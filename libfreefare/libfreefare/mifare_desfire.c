@@ -337,7 +337,7 @@ authenticate (MifareTag tag, uint8_t cmd, uint8_t key_no, MifareDESFireKey key)
     MIFARE_DESFIRE (tag)->authentication_scheme = (AUTHENTICATE_LEGACY == cmd) ? AS_LEGACY : AS_NEW;
 
     BUFFER_INIT (cmd1, 2);
-    BUFFER_INIT (res, 17);
+    BUFFER_INIT (res, 18);
 
     BUFFER_APPEND (cmd1, cmd);
     BUFFER_APPEND (cmd1, key_no);
@@ -620,7 +620,7 @@ mifare_desfire_get_key_version (MifareTag tag, uint8_t key_no, uint8_t *version)
     BUFFER_APPEND (cmd, 0x64);
     BUFFER_APPEND (cmd, key_no);
 
-    BUFFER_INIT (res, 2 + CMAC_LENGTH);
+    BUFFER_INIT (res, 3 + CMAC_LENGTH);
 
     uint8_t *p = mifare_cryto_preprocess_data (tag, cmd, &__cmd_n, 0, MDCM_PLAIN | CMAC_COMMAND);
 
@@ -1327,7 +1327,7 @@ create_file1 (MifareTag tag, uint8_t command, uint8_t file_no, int has_iso_file_
     ASSERT_MIFARE_DESFIRE (tag);
 
     BUFFER_INIT (cmd, 10 + CMAC_LENGTH);
-    BUFFER_INIT (res, 1 + CMAC_LENGTH);
+    BUFFER_INIT (res, 2 + CMAC_LENGTH);
 
     BUFFER_APPEND (cmd, command);
     BUFFER_APPEND (cmd, file_no);
@@ -1576,7 +1576,7 @@ write_data (MifareTag tag, uint8_t command, uint8_t file_no, off_t offset, size_
     ASSERT_CS (cs);
 
     BUFFER_INIT (cmd, 8 + length + CMAC_LENGTH);
-    BUFFER_INIT (res, 1 + CMAC_LENGTH);
+    BUFFER_INIT (res, 2 + CMAC_LENGTH);
 
     BUFFER_APPEND (cmd, command);
     BUFFER_APPEND (cmd, file_no);
