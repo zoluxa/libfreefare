@@ -246,6 +246,7 @@ mifare_ultralight_write (MifareTag tag, const MifareUltralightPageNumber page, c
 int
 mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key)
 {
+    ScheduledKeyContext scheduledKey;
     ASSERT_ACTIVE (tag);
     ASSERT_MIFARE_ULTRALIGHT_C (tag);
 
@@ -263,10 +264,13 @@ mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key)
     memcpy (PICC_RndB, PICC_E_RndB, 8);
     uint8_t ivect[8];
     memset (ivect, '\0', sizeof (ivect));
-    mifare_cypher_single_block (key, PICC_RndB, ivect, MCD_RECEIVE, MCO_DECYPHER, 8);
+
+    crypto_getScheduledKeys(key, MCO_DECYPHER, &scheduledKey);
+
+    mifare_cypher_single_block (&scheduledKey, PICC_RndB, ivect, MCD_RECEIVE, 8);
 
     uint8_t PCD_RndA[8];
-    DES_random_key ((DES_cblock*)&PCD_RndA);
+    crypto_get_des_random_key(PCD_RndA, sizeof(PCD_RndA));
 
     uint8_t PCD_r_RndB[8];
     memcpy (PCD_r_RndB, PICC_RndB, 8);
@@ -277,8 +281,10 @@ mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key)
     memcpy (token+8, PCD_r_RndB, 8);
     size_t offset = 0;
 
+    crypto_getScheduledKeys(key, MCO_ENCYPHER, &scheduledKey);
+
     while (offset < 16) {
-	mifare_cypher_single_block (key, token + offset, ivect, MCD_SEND, MCO_ENCYPHER, 8);
+    mifare_cypher_single_block (&scheduledKey, token + offset, ivect, MCD_SEND, 8);
 	offset += 8;
     }
 
@@ -294,7 +300,9 @@ mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key)
 
     uint8_t PICC_RndA_s[8];
     memcpy (PICC_RndA_s, PICC_E_RndA_s, 8);
-    mifare_cypher_single_block (key, PICC_RndA_s, ivect, MCD_RECEIVE, MCO_DECYPHER, 8);
+    //crypto_update_key_schedules(key, MCO_DECYPHER);
+    crypto_getScheduledKeys(key, MCO_DECYPHER, &scheduledKey);
+    mifare_cypher_single_block (&scheduledKey, PICC_RndA_s, ivect, MCD_RECEIVE, 8);
 
     uint8_t PCD_RndA_s[8];
     memcpy (PCD_RndA_s, PCD_RndA, 8);

@@ -22,7 +22,7 @@
 
 #include "config.h"
 
-#include <openssl/des.h>
+#include "crypto/crypto.h"
 
 /*
  * Endienness macros
@@ -124,6 +124,42 @@ typedef enum {
     MCO_DECYPHER
 } MifareCryptoOperation;
 
+typedef enum MifareCryptoType
+{
+    T_DES,
+    T_3DES,
+    T_3K3DES,
+    T_AES
+} MifareCryptoType;
+
+typedef struct ScheduledKeyContext
+{
+    MifareCryptoType type;
+    MifareCryptoOperation operation;
+
+#ifdef USE_POLARSSL
+    union
+    {
+        des_context  des;
+        des3_context des3;
+        des3_context des3k3;
+
+        aes_context  aes;
+    } Key;
+#else
+    union
+    {
+        struct
+        {
+            DES_key_schedule ks1;
+            DES_key_schedule ks2;
+            DES_key_schedule ks3;
+        } Des;
+        AES_KEY aes;
+    } Key;
+#endif
+} ScheduledKeyContext;
+
 #define MDCM_MASK 0x000F
 
 #define CMAC_NONE 0
@@ -146,7 +182,7 @@ typedef enum {
 
 void		*mifare_cryto_preprocess_data (MifareTag tag, void *data, size_t *nbytes, off_t offset, int communication_settings);
 void		*mifare_cryto_postprocess_data (MifareTag tag, void *data, ssize_t *nbytes, int communication_settings);
-void		 mifare_cypher_single_block (MifareDESFireKey key, uint8_t *data, uint8_t *ivect, MifareCryptoDirection direction, MifareCryptoOperation operation, size_t block_size);
+void         mifare_cypher_single_block (ScheduledKeyContext *context, uint8_t *data, uint8_t *ivect, MifareCryptoDirection direction, size_t block_size);
 void		 mifare_cypher_blocks_chained (MifareTag tag, MifareDESFireKey key, uint8_t *ivect, uint8_t *data, size_t data_size, MifareCryptoDirection direction, MifareCryptoOperation operation);
 void		 rol (uint8_t *data, const size_t len);
 void		 desfire_crc32 (const uint8_t *data, const size_t len, uint8_t *crc);
@@ -212,17 +248,18 @@ struct mifare_desfire_aid {
     uint8_t data[3];
 };
 
+
 struct mifare_desfire_key {
     uint8_t data[24];
-    enum {
-	T_DES,
-	T_3DES,
-	T_3K3DES,
-	T_AES
-    } type;
-    DES_key_schedule ks1;
-    DES_key_schedule ks2;
-    DES_key_schedule ks3;
+    MifareCryptoType type;
+
+    //CryptoDesKeyContext context;
+    /*
+    CRYPTO_DES_KEY ks1;
+    CRYPTO_DES_KEY ks2;
+    CRYPTO_DES_KEY ks3;
+    */
+
     uint8_t cmac_sk1[24];
     uint8_t cmac_sk2[24];
     uint8_t aes_version;
@@ -246,6 +283,8 @@ struct mifare_desfire_tag {
 
 MifareDESFireKey mifare_desfire_session_key_new (uint8_t rnda[8], uint8_t rndb[8], MifareDESFireKey authentication_key);
 const char	*mifare_desfire_error_lookup (uint8_t error);
+
+void crypto_getScheduledKeys(MifareDESFireKey const key, MifareCryptoOperation operation, ScheduledKeyContext* result);
 
 struct mifare_ultralight_tag {
     struct mifare_tag __tag;

@@ -53,9 +53,6 @@
 #  include <sys/types.h>
 #endif
 
-#include <openssl/aes.h>
-#include <openssl/des.h>
-
 #include <err.h>
 #include <string.h>
 #include <strings.h>
@@ -66,6 +63,7 @@
 
 #include <freefare.h>
 #include "freefare_internal.h"
+#include <assert.h>
 
 #define MAC_LENGTH 4
 #define CMAC_LENGTH 8
@@ -73,6 +71,95 @@
 static void	 xor (const uint8_t *ivect, uint8_t *data, const size_t len);
 static void	 desfire_crc32_byte (uint32_t *crc, const uint8_t value);
 static size_t	 key_macing_length (MifareDESFireKey key);
+
+/// Encrypts singe block of data
+static void crypto_des_ecb_encrypt(const uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des_crypt_ecb(&context->Key.des, in, out);      //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt((DES_cblock *)in, (DES_cblock *)out, &context->Key.Des.ks1, DES_ENCRYPT);
+#endif
+}
+
+/// Encrypts singe block of data
+static void crypto_des_ecb_decrypt(const uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des_crypt_ecb(&context->Key.des, in, out);      //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt((DES_cblock *)in, (DES_cblock *)out, &context->Key.Des.ks1, DES_DECRYPT);
+#endif
+}
+
+
+static void crypto_des3_ecb_encrypt(uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des3_crypt_ecb(&context->Key.des3, in, out);    //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_ENCRYPT);
+    DES_ecb_encrypt ((DES_cblock *)out, (DES_cblock *)in,  &context->Key.Des.ks2, DES_DECRYPT);
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_ENCRYPT);
+#endif
+}
+
+static void crypto_des3_ecb_decrypt(uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des3_crypt_ecb(&context->Key.des3, in, out);    //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_DECRYPT);
+    DES_ecb_encrypt ((DES_cblock *)out, (DES_cblock *)in,  &context->Key.Des.ks2, DES_ENCRYPT);
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_DECRYPT);
+#endif
+}
+
+
+static void crypto_des3k3_ecb_encrypt(const uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des3_crypt_ecb(&context->Key.des3k3, in, out);    //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_ENCRYPT);
+    DES_ecb_encrypt ((DES_cblock *)out, (DES_cblock *)in,  &context->Key.Des.ks2, DES_DECRYPT);
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks3, DES_ENCRYPT);
+#endif
+}
+
+static void crypto_des3k3_ecb_decrypt(const uint8_t in[8], uint8_t out[8], ScheduledKeyContext* context)
+{
+#ifdef USE_POLARSSL
+    des3_crypt_ecb(&context->Key.des3k3, in, out);    //  Key schedules must be up to date
+#else
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks3, DES_DECRYPT);
+    DES_ecb_encrypt ((DES_cblock *)out, (DES_cblock *)in,  &context->Key.Des.ks2, DES_ENCRYPT);
+    DES_ecb_encrypt ((DES_cblock *)in,  (DES_cblock *)out, &context->Key.Des.ks1, DES_DECRYPT);
+#endif
+}
+
+static void crypto_aes_encrypt(uint8_t const* in, uint8_t* out, ScheduledKeyContext* context)
+{
+    assert(in && out && context);
+
+#ifdef USE_POLARSSL
+    aes_crypt_ecb(&context->Key.aes, AES_ENCRYPT, in, out);
+#else
+    AES_encrypt (in, out, &context->Key.aes);
+#endif
+}
+
+static void crypto_aes_decrypt(uint8_t const* in, uint8_t* out, ScheduledKeyContext* context)
+{
+    assert(in && out && context);
+
+#ifdef USE_POLARSSL
+    aes_crypt_ecb(&context->Key.aes, AES_DECRYPT, in, out);
+#else
+    AES_decrypt (in, out, &context->Key.aes);
+#endif
+}
+
 
 static void
 xor (const uint8_t *ivect, uint8_t *data, const size_t len)
@@ -649,9 +736,8 @@ mifare_cryto_postprocess_data (MifareTag tag, void *data, ssize_t *nbytes, int c
 }
 
 void
-mifare_cypher_single_block (MifareDESFireKey key, uint8_t *data, uint8_t *ivect, MifareCryptoDirection direction, MifareCryptoOperation operation, size_t block_size)
+mifare_cypher_single_block (ScheduledKeyContext *context, uint8_t *data, uint8_t *ivect, MifareCryptoDirection direction, size_t block_size)
 {
-    AES_KEY k;
     uint8_t ovect[MAX_CRYPTO_BLOCK_SIZE];
 
     if (direction == MCD_SEND) {
@@ -662,58 +748,44 @@ mifare_cypher_single_block (MifareDESFireKey key, uint8_t *data, uint8_t *ivect,
 
     uint8_t edata[MAX_CRYPTO_BLOCK_SIZE];
 
-    switch (key->type) {
+    switch (context->type) {
     case T_DES:
-	switch (operation) {
-	case MCO_ENCYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data, (DES_cblock *) edata, &(key->ks1), DES_ENCRYPT);
-	    break;
-	case MCO_DECYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data, (DES_cblock *) edata, &(key->ks1), DES_DECRYPT);
-	    break;
-	}
-	break;
+        {
+            if (context->operation == MCO_ENCYPHER)
+                crypto_des_ecb_encrypt(data, edata, context);
+            else
+                crypto_des_ecb_decrypt(data, edata, context);
+        }
+        break;
     case T_3DES:
-	switch (operation) {
-	case MCO_ENCYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_ENCRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) edata, (DES_cblock *) data,  &(key->ks2), DES_DECRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_ENCRYPT);
-	    break;
-	case MCO_DECYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_DECRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) edata, (DES_cblock *) data,  &(key->ks2), DES_ENCRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_DECRYPT);
-	    break;
-	}
-	break;
+        {
+            if (context->operation == MCO_ENCYPHER)
+                crypto_des3_ecb_encrypt(data, edata, context);
+            else
+                crypto_des3_ecb_decrypt(data, edata, context);
+        }
+        break;
     case T_3K3DES:
-	switch (operation) {
-	case MCO_ENCYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_ENCRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) edata, (DES_cblock *) data,  &(key->ks2), DES_DECRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks3), DES_ENCRYPT);
-	    break;
-	case MCO_DECYPHER:
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks3), DES_DECRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) edata, (DES_cblock *) data,  &(key->ks2), DES_ENCRYPT);
-	    DES_ecb_encrypt ((DES_cblock *) data,  (DES_cblock *) edata, &(key->ks1), DES_DECRYPT);
-	    break;
-	}
-	break;
+        {
+            if (context->operation == MCO_ENCYPHER)
+                crypto_des3k3_ecb_encrypt(data, edata, context);
+            else
+                crypto_des3k3_ecb_decrypt(data, edata, context);
+        }
+        break;
     case T_AES:
-	switch (operation) {
-	case MCO_ENCYPHER:
-	    AES_set_encrypt_key (key->data, 8*16, &k);
-	    AES_encrypt (data, edata, &k);
-	    break;
-	case MCO_DECYPHER:
-	    AES_set_decrypt_key (key->data, 8*16, &k);
-	    AES_decrypt (data, edata, &k);
-	    break;
+        {
+            if (context->operation == MCO_ENCYPHER)
+                crypto_aes_encrypt(data, edata, context);
+            else
+                crypto_aes_decrypt(data, edata, context);
+        }
+        break;
+    default:
+        //  Shouldn't happen
+        assert(0);
+        break;
 	}
-	break;
-    }
 
     memcpy (data, edata, block_size);
 
@@ -739,6 +811,7 @@ void
 mifare_cypher_blocks_chained (MifareTag tag, MifareDESFireKey key, uint8_t *ivect, uint8_t *data, size_t data_size, MifareCryptoDirection direction, MifareCryptoOperation operation)
 {
     size_t block_size;
+    ScheduledKeyContext keyScheduled;
 
     if (tag) {
 	if (!key)
@@ -761,8 +834,11 @@ mifare_cypher_blocks_chained (MifareTag tag, MifareDESFireKey key, uint8_t *ivec
     block_size = key_block_size (key);
 
     size_t offset = 0;
+
+    crypto_getScheduledKeys(key, operation, &keyScheduled);
+
     while (offset < data_size) {
-	mifare_cypher_single_block (key, data + offset, ivect, direction, operation, block_size);
+    mifare_cypher_single_block (&keyScheduled, data + offset, ivect, direction, block_size);
 	offset += block_size;
     }
 }

@@ -20,21 +20,56 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <openssl/des.h>
-
 #include <freefare.h>
 #include "freefare_internal.h"
 
-static inline void update_key_schedules (MifareDESFireKey key);
-
-static inline void
-update_key_schedules (MifareDESFireKey key)
+void crypto_getScheduledKeys(MifareDESFireKey const key, MifareCryptoOperation operation, ScheduledKeyContext* result)
 {
-    DES_set_key ((DES_cblock *)key->data, &(key->ks1));
-    DES_set_key ((DES_cblock *)(key->data + 8), &(key->ks2));
-    if (T_3K3DES == key->type) {
-	DES_set_key ((DES_cblock *)(key->data + 16), &(key->ks3));
+    result->operation = operation;
+    result->type = key->type;
+#ifdef USE_POLARSSL
+    if (operation == MCO_ENCYPHER)
+    {
+        switch (key->type)
+        {
+        case T_DES:     des_setkey_enc(&result->Key.des, key->data);       break;
+        case T_3DES:    des3_set2key_enc(&result->Key.des3, key->data);    break;
+        case T_3K3DES:  des3_set3key_enc(&result->Key.des3k3, key->data);  break;
+        case T_AES:     aes_setkey_enc(&result->Key.aes, key->data, 128);  break;
+        default:
+            break;
+        }
     }
+    else if (operation == MCO_DECYPHER)
+    {
+        switch (key->type)
+        {
+        case T_DES:     des_setkey_dec(&result->Key.des, key->data);       break;
+        case T_3DES:    des3_set2key_dec(&result->Key.des3, key->data);    break;
+        case T_3K3DES:  des3_set3key_dec(&result->Key.des3k3, key->data);  break;
+        case T_AES:     aes_setkey_dec(&result->Key.aes, key->data, 128);        break;
+        default:
+            break;
+        }
+    }
+#else
+    if (key->type == T_AES)
+    {
+        if (operation == MCO_ENCYPHER)
+            AES_set_encrypt_key (key->data, 8*16, &result->Key.aes);
+        else if (operation == MCO_DECYPHER)
+            AES_set_decrypt_key (key->data, 8*16, &result->Key.aes);
+    }
+    else // DES/3DES/3K3DES
+    {
+        DES_set_key((DES_cblock *)key->data, &result->Key.Des.ks1);
+        DES_set_key ((DES_cblock *)(key->data + 8), &result->Key.Des.ks2);
+        if (T_3K3DES == key->type)
+        {
+            DES_set_key ((DES_cblock *)(key->data + 16), &result->Key.Des.ks3);
+        }
+    }
+#endif
 }
 
 MifareDESFireKey
@@ -55,8 +90,7 @@ mifare_desfire_des_key_new_with_version (uint8_t value[8])
     if ((key = malloc (sizeof (struct mifare_desfire_key)))) {
 	key->type = T_DES;
 	memcpy (key->data, value, 8);
-	memcpy (key->data+8, value, 8);
-	update_key_schedules (key);
+    memcpy (key->data+8, value, 8);
     }
     return key;
 }
@@ -81,7 +115,6 @@ mifare_desfire_3des_key_new_with_version (uint8_t value[16])
     if ((key = malloc (sizeof (struct mifare_desfire_key)))) {
 	key->type = T_3DES;
 	memcpy (key->data, value, 16);
-	update_key_schedules (key);
     }
     return key;
 }
@@ -104,7 +137,6 @@ mifare_desfire_3k3des_key_new_with_version (uint8_t value[24])
     if ((key = malloc (sizeof (struct mifare_desfire_key)))) {
 	key->type = T_3K3DES;
 	memcpy (key->data, value, 24);
-	update_key_schedules (key);
     }
     return key;
 }
