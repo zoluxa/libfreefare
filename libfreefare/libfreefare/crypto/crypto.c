@@ -12,8 +12,20 @@
 int crypto_get_random_bytes(uint8_t* buf, unsigned len)
 {
     assert(buf && len);
-
-#ifdef USE_POLARSSL
+#define HAVE_TRNG
+#if defined(HAVE_TRNG)
+    uint32_t true_random(void);
+    for (unsigned i = 0; i < len; )
+    {
+        uint32_t rnd = true_random();
+        for (unsigned j = 0; i < len && j < 4; ++i, ++j, ++buf)
+        {
+            *buf = rnd & 0xFF;
+            rnd >>= 8;
+        }
+    }
+    return 1;
+#elif defined(USE_POLARSSL)
     havege_state hs;
     havege_init( &hs );
     int res = havege_random(&hs, buf, len);
